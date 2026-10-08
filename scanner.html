@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Web Scanner Presensi Santri</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- HTML5-QRCode Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        #reader {
+            width: 100% !important;
+            height: 100% !important;
+            border: none !important;
+            position: relative;
+        }
+        #reader video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            border-radius: 1rem;
+        }
+        @keyframes scanLaser {
+            0% { top: 12%; opacity: 0.8; }
+            50% { top: 88%; opacity: 1; }
+            100% { top: 12%; opacity: 0.8; }
+        }
+        .laser-line {
+            animation: scanLaser 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+    <!-- Navbar -->
+    <header class="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-30 px-4 py-3">
+        <div class="max-w-md mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
+                    <i class="fas fa-qrcode text-white text-base"></i>
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold text-white tracking-wide">Scanner Presensi</h1>
+                    <p class="text-[10px] text-indigo-400 font-medium">Terhubung ke Google Spreadsheet</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="openConfigModal()" title="Pengaturan URL Web App" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center gap-1.5 text-slate-300 hover:text-white transition border border-slate-700 text-xs font-semibold">
+                    <i class="fas fa-cog text-xs text-indigo-400"></i>
+                    <span>Setelan</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-md mx-auto w-full p-4 flex flex-col space-y-3">
+
+        <!-- Status Database URL Warning Banner -->
+        <div id="urlWarningBanner" class="hidden bg-amber-500/20 border border-amber-500/40 rounded-2xl p-3 text-amber-200 text-xs flex items-center justify-between shadow-lg">
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-exclamation-triangle text-amber-400 text-base"></i>
+                <span>URL Web App belum diatur!</span>
+            </div>
+            <button onclick="openConfigModal()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-xl text-xs transition">
+                Atur URL
+            </button>
+        </div>
+
+        <!-- Camera Scanner Card with HUD Overlay -->
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden p-3 relative">
+            <div class="relative w-full aspect-square bg-black rounded-xl overflow-hidden shadow-inner">
+                <!-- HTML5 QrCode Container -->
+                <div id="reader" class="w-full h-full"></div>
+                
+                <!-- HUD Overlay: Status & Reticle -->
+                <div id="scannerHud" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 z-10">
+                    <!-- Top Status Badge -->
+                    <div class="flex items-center justify-between">
+                        <span id="hudBadge" class="bg-slate-950/80 backdrop-blur-md text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-lg">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span id="hudStatusText">Kamera Aktif &bull; Arahkan ke QR Code</span>
+                        </span>
+                    </div>
+
+                    <!-- Target Reticle in Center -->
+                    <div class="self-center w-52 h-52 relative">
+                        <div class="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-400 rounded-tl-lg"></div>
+                        <div class="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-400 rounded-tr-lg"></div>
+                        <div class="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-400 rounded-bl-lg"></div>
+                        <div class="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-400 rounded-br-lg"></div>
+                        <div id="laserLine" class="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent laser-line shadow-[0_0_12px_#22d3ee]"></div>
+                    </div>
+
+                    <!-- Live In-Camera Toast Banner (Always Visible on Screen!) -->
+                    <div id="cameraToast" class="hidden bg-slate-950/95 backdrop-blur-md rounded-xl p-3 border border-indigo-500/60 shadow-2xl transition-all">
+                        <div id="cameraToastContent"></div>
+                    </div>
+                </div>
+
+                <!-- Camera Loading / Permission Overlay -->
+                <div id="camLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/95 z-20 transition-opacity">
+                    <i class="fas fa-circle-notch fa-spin text-3xl mb-3 text-indigo-500"></i>
+                    <p class="text-xs font-semibold text-slate-300">Menyiapkan Kamera...</p>
+                </div>
+            </div>
+
+            <!-- Controls: Kamera Belakang / Depan -->
+            <div class="grid grid-cols-2 gap-2 mt-2.5">
+                <button onclick="startCamera('environment')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition border border-slate-700/60">
+                    <i class="fas fa-sync-alt text-indigo-400"></i> Kamera Belakang
+                </button>
+                <button onclick="startCamera('user')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition border border-slate-700/60">
+                    <i class="fas fa-user text-purple-400"></i> Kamera Depan
+                </button>
+            </div>
+
+            <!-- Snapshot / File Scan Fallback -->
+            <div class="mt-2">
+                <input type="file" id="fileScanInput" accept="image/*" capture="environment" class="hidden" onchange="handleFileScan(this)">
+                <button onclick="document.getElementById('fileScanInput').click()" class="w-full bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 py-2 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition">
+                    <i class="fas fa-camera"></i> Ambil Foto QR / Scan Gambar
+                </button>
+            </div>
+        </div>
+
+        <!-- Manual NISN Input Box (Bisa digunakan langsung atau untuk uji coba) -->
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 p-3 shadow-xl">
+            <label class="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">Input NISN Manual (Cadangan)</label>
+            <div class="flex gap-2">
+                <input type="text" id="manualNisnInput" placeholder="Ketik NISN Siswa..."
+                    class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <button onclick="submitManualNisn()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-md shadow-indigo-600/30">
+                    Kirim
+                </button>
+            </div>
+        </div>
+
+        <!-- Recent Scans / Log Card -->
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 p-4 shadow-xl">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fas fa-history text-indigo-400"></i> Riwayat Presensi Hari Ini
+                </h3>
+                <button onclick="clearHistory()" class="text-[10px] text-slate-400 hover:text-red-400 transition">
+                    Hapus
+                </button>
+            </div>
+            <div id="historyList" class="space-y-2 max-h-48 overflow-y-auto text-xs pr-1">
+                <div class="text-center py-4 text-slate-500 text-[11px] italic">
+                    Belum ada santri yang discan hari ini
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal Konfigurasi URL Google Apps Script -->
+    <div id="configModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl animate-fade-in">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="font-bold text-sm text-white flex items-center gap-2">
+                    <i class="fas fa-plug text-indigo-400"></i> Hubungkan ke Spreadsheet
+                </h3>
+                <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+            <p class="text-[11px] text-slate-300 mb-3 leading-relaxed">
+                Masukkan link <b>Web App URL</b> Google Apps Script Anda (berakhir dengan <code>/exec</code>):
+            </p>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">URL Web App (/exec)</label>
+                    <input type="url" id="gasUrlInput" placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                        class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Role Petugas Presensi</label>
+                    <select id="scannerRoleInput" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+                        <option value="guru">Guru / Ustadzah</option>
+                        <option value="admin">Administrator</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Tombol Tes Koneksi -->
+            <div class="mt-3">
+                <button type="button" onclick="testConnection()" class="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-semibold py-2 rounded-xl text-xs transition flex items-center justify-center gap-1.5">
+                    <i class="fas fa-bolt text-xs"></i> Tes Koneksi ke Spreadsheet
+                </button>
+                <div id="testConnResult" class="hidden mt-2 p-2 rounded-xl text-[11px] font-medium leading-relaxed"></div>
+            </div>
+
+            <div class="mt-4 flex gap-2">
+                <button onclick="saveConfig()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-lg shadow-indigo-600/30">
+                    Simpan Pengaturan
+                </button>
+                <button onclick="closeConfigModal()" class="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl text-xs transition">
+                    Batal
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- GLOBAL VARIABLES ---
+        let html5QrCode = null;
+        let isProcessing = false;
+        let currentFacingMode = 'environment';
+        let scanHistory = JSON.parse(localStorage.getItem('absensi_scan_history') || '[]');
+        let audioCtx = null;
+
+        // --- WEB AUDIO API (Synthesizer Beep) ---
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // Buka audio context pada sentuhan/klik pertama pengguna
+        window.addEventListener('click', initAudio, { once: true });
+        window.addEventListener('touchstart', initAudio, { once: true });
+
+        function playBeep(type = 'success') {
+            try {
+                initAudio();
+                if (!audioCtx) return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(1760, audioCtx.currentTime + 0.1);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.25);
+                } else if (type === 'warning') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(987.77, audioCtx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.35);
+                } else {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(320, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(200, audioCtx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.35);
+                }
+            } catch (e) {
+                console.warn("Audio error:", e);
+            }
+        }
+
+        // --- INITIALIZATION ---
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedUrl = localStorage.getItem('absensi_gas_url');
+            if (!savedUrl) {
+                document.getElementById('urlWarningBanner').classList.remove('hidden');
+            }
+            renderHistory();
+            startCamera('environment');
+        });
+
+        // --- MODAL CONFIG ---
+        function openConfigModal() {
+            document.getElementById('gasUrlInput').value = localStorage.getItem('absensi_gas_url') || '';
+            document.getElementById('scannerRoleInput').value = localStorage.getItem('absensi_scanner_role') || 'guru';
+            document.getElementById('testConnResult').classList.add('hidden');
+            document.getElementById('configModal').classList.remove('hidden');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('configModal').classList.add('hidden');
+        }
+
+        function saveConfig() {
+            let url = document.getElementById('gasUrlInput').value.trim();
+            const role = document.getElementById('scannerRoleInput').value;
+            if (!url) {
+                alert('Silakan masukkan URL Web App Google Apps Script!');
+                return;
+            }
+            // Bersihkan parameter jika ada
+            url = url.split('?')[0];
+
+            localStorage.setItem('absensi_gas_url', url);
+            localStorage.setItem('absensi_scanner_role', role);
+            document.getElementById('urlWarningBanner').classList.add('hidden');
+            closeConfigModal();
+            alert('Pengaturan URL berhasil disimpan!');
+        }
+
+        // --- TES KONEKSI ---
+        function testConnection() {
+            let url = document.getElementById('gasUrlInput').value.trim();
+            const resultEl = document.getElementById('testConnResult');
+            resultEl.classList.remove('hidden');
+
+            if (!url) {
+                resultEl.className = 'mt-2 p-2.5 rounded-xl text-xs bg-red-900/40 text-red-300 border border-red-500/40';
+                resultEl.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Masukkan URL Web App terlebih dahulu!';
+                return;
+            }
+
+            url = url.split('?')[0];
+            resultEl.className = 'mt-2 p-2.5 rounded-xl text-xs bg-indigo-900/40 text-indigo-200 border border-indigo-500/40 animate-pulse';
+            resultEl.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Menghubungi Google Apps Script...';
+
+            // Panggil API dengan action test
+            callAppsScript(url, 'TEST_NISN', 'guru', (res, rawText) => {
+                if (res) {
+                    resultEl.className = 'mt-2 p-2.5 rounded-xl text-xs bg-emerald-900/40 text-emerald-300 border border-emerald-500/40';
+                    resultEl.innerHTML = '<b><i class="fas fa-check-circle mr-1"></i> Koneksi Berhasil!</b><br>Script terhubung ke Google Spreadsheet dengan baik.';
+                } else if (rawText && rawText.includes('<!DOCTYPE')) {
+                    resultEl.className = 'mt-2 p-2.5 rounded-xl text-xs bg-amber-900/40 text-amber-200 border border-amber-500/40';
+                    resultEl.innerHTML = '<b><i class="fas fa-exclamation-triangle mr-1"></i> Kode Baru Belum Di-Deploy!</b><br>URL merespons HTML aplikasi, bukan API. Lakukan di Google Apps Script: <b>Deploy &gt; Kelola Deployment &gt; Edit (pensil) &gt; Versi Baru &gt; Deploy</b>.';
+                } else {
+                    resultEl.className = 'mt-2 p-2.5 rounded-xl text-xs bg-red-900/40 text-red-300 border border-red-500/40';
+                    resultEl.innerHTML = '<i class="fas fa-times-circle mr-1"></i> Gagal terhubung ke URL tersebut. Pastikan akses Web App diset ke "Anyone" (Siapa saja).';
+                }
+            });
+        }
+
+        // --- CAMERA CONTROLLER ---
+        function startCamera(mode) {
+            currentFacingMode = mode;
+            const loading = document.getElementById('camLoading');
+            loading.classList.remove('hidden');
+
+            const initEngine = () => {
+                const reader = document.getElementById('reader');
+                reader.innerHTML = '';
+                try {
+                    html5QrCode = new Html5Qrcode('reader');
+                } catch(e) {
+                    console.warn(e);
+                }
+
+                // Konfigurasi pemindaian seluruh area kamera tanpa batas qrbox sempit
+                const config = {
+                    fps: 15,
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true
+                    }
+                };
+
+                const fallbackConstraint = { facingMode: { ideal: mode } };
+
+                Html5Qrcode.getCameras().then(devices => {
+                    let chosenId = null;
+                    if (devices && devices.length > 0) {
+                        if (mode === 'environment') {
+                            const backCam = devices.find(d => /back|rear|belakang|environment/i.test(d.label));
+                            chosenId = backCam ? backCam.id : devices[devices.length - 1].id;
+                        } else {
+                            const frontCam = devices.find(d => /front|depan|user|face/i.test(d.label));
+                            chosenId = frontCam ? frontCam.id : devices[0].id;
+                        }
+                    }
+                    const source = chosenId ? chosenId : fallbackConstraint;
+                    return html5QrCode.start(source, config, onScanSuccess, () => {});
+                }).then(() => {
+                    loading.classList.add('hidden');
+                    isProcessing = false;
+                    updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code');
+                }).catch(err => {
+                    // Fallback langsung menggunakan constraints
+                    html5QrCode.start(fallbackConstraint, config, onScanSuccess, () => {})
+                        .then(() => {
+                            loading.classList.add('hidden');
+                            isProcessing = false;
+                            updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code');
+                        })
+                        .catch(errFinal => {
+                            loading.classList.add('hidden');
+                            updateHudBadge('error', 'Kamera Gagal Dibuka');
+                            showToastAlert('error', `Akses Kamera Gagal: ${errFinal}. Pastikan izin kamera aktif.`);
+                        });
+                });
+            };
+
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(initEngine).catch(initEngine);
+            } else {
+                initEngine();
+            }
+        }
+
+        // --- SCAN SUCCESS CALLBACK ---
+        function onScanSuccess(decodedText) {
+            if (!decodedText || decodedText.trim() === '' || isProcessing) return;
+            isProcessing = true;
+
+            const cleanCode = decodedText.trim();
+            if (navigator.vibrate) navigator.vibrate(100);
+
+            // Update HUD status langsung pada layar kamera
+            updateHudBadge('busy', `QR Terbaca: ${cleanCode}`);
+            showToastAlert('loading', `
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-circle-notch fa-spin text-indigo-400"></i>
+                    <div>
+                        <div class="font-bold text-xs text-white">NISN Terdeteksi: ${cleanCode}</div>
+                        <div class="text-[10px] text-slate-400">Menghubungkan ke Spreadsheet...</div>
+                    </div>
+                </div>
+            `);
+
+            processAbsensi(cleanCode);
+        }
+
+        // --- SCAN DARI FOTO/FILE ---
+        function handleFileScan(input) {
+            if (!input.files || input.files.length === 0) return;
+            const file = input.files[0];
+            const loading = document.getElementById('camLoading');
+            loading.classList.remove('hidden');
+
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode('reader');
+            }
+
+            html5QrCode.scanFile(file, true)
+                .then(decodedText => {
+                    loading.classList.add('hidden');
+                    onScanSuccess(decodedText);
+                })
+                .catch(err => {
+                    loading.classList.add('hidden');
+                    playBeep('error');
+                    showToastAlert('error', 'QR Code tidak terdeteksi dari foto. Pastikan gambar jelas dan terang.');
+                    setTimeout(() => { isProcessing = false; }, 3000);
+                });
+            input.value = '';
+        }
+
+        // --- MANUAL NISN INPUT ---
+        function submitManualNisn() {
+            const input = document.getElementById('manualNisnInput');
+            const nisn = input.value.trim();
+            if (!nisn) {
+                alert('Ketik NISN siswa terlebih dahulu!');
+                return;
+            }
+            onScanSuccess(nisn);
+            input.value = '';
+        }
+
+        // --- HUD BADGE & TOAST CONTROLLERS ---
+        function updateHudBadge(type, text) {
+            const badge = document.getElementById('hudBadge');
+            const statusText = document.getElementById('hudStatusText');
+            statusText.innerText = text;
+
+            if (type === 'ready') {
+                badge.className = 'bg-slate-950/80 backdrop-blur-md text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-lg';
+            } else if (type === 'busy') {
+                badge.className = 'bg-slate-950/80 backdrop-blur-md text-amber-300 text-[10px] font-bold px-3 py-1.5 rounded-full border border-amber-500/30 flex items-center gap-1.5 shadow-lg animate-pulse';
+            } else if (type === 'warning') {
+                badge.className = 'bg-slate-950/80 backdrop-blur-md text-amber-400 text-[10px] font-bold px-3 py-1.5 rounded-full border border-amber-500/40 flex items-center gap-1.5 shadow-lg';
+            } else if (type === 'error') {
+                badge.className = 'bg-slate-950/80 backdrop-blur-md text-red-400 text-[10px] font-bold px-3 py-1.5 rounded-full border border-red-500/30 flex items-center gap-1.5 shadow-lg';
+            }
+        }
+
+        function showToastAlert(type, htmlContent, durationMs = 0) {
+            const toast = document.getElementById('cameraToast');
+            const content = document.getElementById('cameraToastContent');
+            toast.classList.remove('hidden');
+            content.innerHTML = htmlContent;
+
+            if (type === 'error') {
+                toast.className = 'bg-rose-950/95 backdrop-blur-md rounded-xl p-3 border border-rose-500/60 shadow-2xl transition-all';
+            } else if (type === 'warning') {
+                toast.className = 'bg-amber-950/95 backdrop-blur-md rounded-xl p-3 border border-amber-500/60 shadow-2xl transition-all';
+            } else if (type === 'success') {
+                toast.className = 'bg-slate-900/95 backdrop-blur-md rounded-xl p-3 border border-emerald-500/60 shadow-2xl transition-all';
+            } else {
+                toast.className = 'bg-slate-950/95 backdrop-blur-md rounded-xl p-3 border border-indigo-500/60 shadow-2xl transition-all';
+            }
+
+            if (durationMs > 0) {
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                }, durationMs);
+            }
+        }
+
+        // --- PROSES ABSENSI KE GOOGLE APPS SCRIPT ---
+        function processAbsensi(nisn) {
+            let gasUrl = localStorage.getItem('absensi_gas_url') || '';
+            const role = localStorage.getItem('absensi_scanner_role') || 'guru';
+
+            if (!gasUrl) {
+                playBeep('error');
+                showToastAlert('error', `
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-exclamation-triangle text-amber-400 text-base"></i>
+                        <div class="text-xs">
+                            <span class="font-bold">URL Belum Diatur:</span> Klik tombol <b>Setelan</b> di atas untuk memasukkan link Web App Google Apps Script.
+                        </div>
+                    </div>
+                `, 5000);
+                setTimeout(() => { isProcessing = false; updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code'); }, 4000);
+                return;
+            }
+
+            gasUrl = gasUrl.trim().split('?')[0];
+
+            callAppsScript(gasUrl, nisn, role, (result, rawText) => {
+                if (result && result.success) {
+                    playBeep('success');
+                    if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+
+                    const isDatang = result.type === 'datang';
+                    const jam = isDatang ? result.jamDatang : result.jamPulang;
+                    const badgeText = result.message || (isDatang ? 'Presensi Datang' : 'Presensi Pulang');
+
+                    showToastAlert('success', `
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${isDatang ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'}">
+                                    ${badgeText}
+                                </span>
+                                <h3 class="text-sm font-black text-white mt-1 uppercase tracking-tight">${result.nama || 'Santri'}</h3>
+                                <p class="text-[11px] text-slate-300 font-medium">${result.kelas || ''}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[9px] text-slate-400 block font-semibold">Pukul</span>
+                                <span class="text-xl font-black font-mono ${isDatang ? 'text-emerald-400' : 'text-cyan-400'}">${jam || '--:--'}</span>
+                            </div>
+                        </div>
+                    `, 3500);
+
+                    addToHistory(result);
+                    setTimeout(() => {
+                        isProcessing = false;
+                        updateHudBadge('ready', 'Kamera Aktif • Siap untuk santri berikutnya...');
+                    }, 3000);
+
+                } else if (result && (result.alreadyScanned || (result.message && (result.message.toLowerCase().includes('sudah scan') || result.message.toLowerCase().includes('sudah melakukan') || result.message.toLowerCase().includes('terlalu cepat'))))) {
+                    // === SISWA SUDAH PRESENSI (HADIR) / SCAN BERULANG ===
+                    playBeep('warning');
+                    if (navigator.vibrate) navigator.vibrate([80, 80]);
+
+                    const namaSiswa = result.nama || 'Siswa';
+                    const kelasSiswa = result.kelas || '';
+                    let cleanMsg = result.message || 'Siswa sudah melakukan presensi hari ini.';
+                    if (cleanMsg.toLowerCase().includes('terlalu cepat')) {
+                        cleanMsg = `Siswa sudah scan presensi hari ini (Status: Hadir).`;
+                    }
+
+                    updateHudBadge('warning', `Sudah Hadir: ${namaSiswa}`);
+                    showToastAlert('warning', `
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="space-y-1">
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                    <i class="fas fa-check-circle text-amber-400"></i> SUDAH SCAN ABSENSI (HADIR)
+                                </span>
+                                <h3 class="text-sm font-black text-white uppercase tracking-tight">${namaSiswa}</h3>
+                                ${kelasSiswa ? `<p class="text-[10px] text-slate-300 font-semibold">${kelasSiswa}</p>` : ''}
+                                <p class="text-[11px] text-amber-200 leading-tight">${cleanMsg}</p>
+                            </div>
+                            ${result.jam ? `
+                            <div class="text-right shrink-0">
+                                <span class="text-[9px] text-amber-400/80 block font-semibold">Tercatat</span>
+                                <span class="text-lg font-black font-mono text-amber-300">${result.jam}</span>
+                            </div>` : ''}
+                        </div>
+                    `, 4000);
+
+                    setTimeout(() => {
+                        isProcessing = false;
+                        updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code');
+                    }, 2500);
+
+                } else if (result && !result.success) {
+                    playBeep('error');
+                    showToastAlert('error', `
+                        <div class="flex items-center gap-2.5">
+                            <i class="fas fa-times-circle text-rose-400 text-lg shrink-0"></i>
+                            <div>
+                                <div class="font-bold text-xs text-rose-300">Gagal Mencatat Presensi</div>
+                                <div class="text-[11px] text-rose-200">${result.message || 'Data santri tidak valid'}</div>
+                            </div>
+                        </div>
+                    `, 4000); 
+                    setTimeout(() => {
+                        isProcessing = false;
+                        updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code');
+                    }, 2500);
+
+                } else {
+                    // Terjadi masalah koneksi atau Apps Script belum di-deploy versi baru
+                    playBeep('error');
+                    let errorHint = 'Gagal menghubungi server Google Apps Script.';
+                    if (rawText && rawText.includes('<!DOCTYPE')) {
+                        errorHint = '<b>Kode belum di-Deploy!</b> Di Apps Script, klik: <b>Deploy &gt; Kelola Deployment &gt; Edit &gt; Versi Baru &gt; Deploy</b>.';
+                    }
+
+                    showToastAlert('error', `
+                        <div class="text-xs leading-relaxed text-rose-200">
+                            <div class="font-bold text-rose-300 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i> Gagal Memproses Data</div>
+                            <div>${errorHint}</div>
+                        </div>
+                    `, 5000);
+
+                    setTimeout(() => {
+                        isProcessing = false;
+                        updateHudBadge('ready', 'Kamera Aktif • Arahkan ke QR Code');
+                    }, 2500);
+                }
+            });
+        }
+
+        // --- FUNGSI MULTI-STRATEGI PEMANGGILAN GOOGLE APPS SCRIPT (OPTIMAL) ---
+        function callAppsScript(gasUrl, nisn, role, callback) {
+            let handled = false;
+            const finish = (res, raw) => {
+                if (!handled) {
+                    handled = true;
+                    callback(res, raw);
+                }
+            };
+
+            const getApiUrl = `${gasUrl}?action=scanAbsensi&nisn=${encodeURIComponent(nisn)}&scannerRole=${encodeURIComponent(role)}&_=${Date.now()}`;
+
+            // Coba Fetch GET langsung (Paling cepat di browser modern)
+            fetch(getApiUrl, { method: 'GET', redirect: 'follow' })
+                .then(r => r.text())
+                .then(text => {
+                    try {
+                        const parsed = JSON.parse(text);
+                        finish(parsed, text);
+                    } catch(e) {
+                        finish(null, text);
+                    }
+                })
+                .catch(err => {
+                    // Fallback cepat ke JSONP jika fetch diblokir CORS pada webview tertentu
+                    const callbackName = 'gas_cb_' + Math.floor(Math.random() * 1000000);
+                    const scriptTag = document.createElement('script');
+                    const jsonpUrl = `${gasUrl}?action=scanAbsensi&nisn=${encodeURIComponent(nisn)}&scannerRole=${encodeURIComponent(role)}&callback=${callbackName}&_=${Date.now()}`;
+
+                    window[callbackName] = function(jsonResult) {
+                        delete window[callbackName];
+                        if (scriptTag.parentNode) scriptTag.parentNode.removeChild(scriptTag);
+                        finish(jsonResult, null);
+                    };
+
+                    scriptTag.onerror = function() {
+                        delete window[callbackName];
+                        if (scriptTag.parentNode) scriptTag.parentNode.removeChild(scriptTag);
+                        finish(null, err.message);
+                    };
+
+                    scriptTag.src = jsonpUrl;
+                    document.head.appendChild(scriptTag);
+                });
+
+            // Timeout pelindung 8 detik
+            setTimeout(() => {
+                if (!handled) {
+                    finish(null, 'Waktu koneksi habis (Timeout)');
+                }
+            }, 8000);
+        }
+
+        // --- HISTORY RIWAYAT SCAN ---
+        function addToHistory(res) {
+            const item = {
+                nama: res.nama || 'Santri',
+                kelas: res.kelas || '',
+                type: res.type || 'datang',
+                jam: res.type === 'datang' ? res.jamDatang : res.jamPulang,
+                timeStr: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+            };
+            scanHistory.unshift(item);
+            if (scanHistory.length > 25) scanHistory.pop();
+            localStorage.setItem('absensi_scan_history', JSON.stringify(scanHistory));
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const listEl = document.getElementById('historyList');
+            if (!scanHistory || scanHistory.length === 0) {
+                listEl.innerHTML = `<div class="text-center py-4 text-slate-500 text-[11px] italic">Belum ada santri yang discan hari ini</div>`;
+                return;
+            }
+
+            listEl.innerHTML = scanHistory.map(item => `
+                <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-6 h-6 rounded-lg ${item.type === 'datang' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-cyan-500/20 text-cyan-400'} flex items-center justify-center text-[10px]">
+                            <i class="fas ${item.type === 'datang' ? 'fa-arrow-down' : 'fa-arrow-up'}"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-200 text-xs">${item.nama}</div>
+                            <div class="text-[10px] text-slate-400">${item.kelas}</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-mono font-bold text-xs ${item.type === 'datang' ? 'text-emerald-400' : 'text-cyan-400'}">${item.jam || item.timeStr}</div>
+                        <div class="text-[9px] text-slate-400 uppercase font-semibold">${item.type}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function clearHistory() {
+            if (confirm('Hapus seluruh riwayat scan hari ini?')) {
+                scanHistory = [];
+                localStorage.removeItem('absensi_scan_history');
+                renderHistory();
+            }
+        }
+    </script>
+</body>
+</html>
